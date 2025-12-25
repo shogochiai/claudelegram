@@ -102,7 +102,7 @@ waitForResponse cfg cid timeout offset = do
     ||| Only considers CallbackQuery updates with "CID|CHOICE" format
     findMatchingResponse : CorrelationId -> List TgUpdate -> Maybe String
     findMatchingResponse _ [] = Nothing
-    -- Ignore message updates (text replies not supported in Option A)
+    -- Ignore message updates (text replies not supported in callback mode)
     findMatchingResponse targetCid (MkMessageUpdate _ _ :: rest) =
       findMatchingResponse targetCid rest
     -- Check callback updates for CID match
@@ -117,3 +117,41 @@ waitForResponse cfg cid timeout offset = do
                 then Just choice
                 else findMatchingResponse targetCid rest
     findMatchingResponse targetCid (_ :: rest) = findMatchingResponse targetCid rest
+
+||| Wait for a text reply to a specific message (for idle_prompt etc.)
+||| Returns when a reply to sentMsgId is received or timeout
+||| Matches by reply_to_message.message_id
+export
+waitForTextReply : Config -> (sentMsgId : Integer) -> (timeout : Nat) -> (offset : Integer) -> IO (Either String String)
+waitForTextReply cfg sentMsgId timeout offset = do
+  let pollTimeout = min timeout 5
+  result <- getUpdates cfg.botToken offset pollTimeout
+
+  case result of
+    Left err => pure (Left err)
+    Right [] =>
+      if timeout <= pollTimeout
+        then pure (Left "Timeout waiting for text reply")
+        else waitForTextReply cfg sentMsgId (minus timeout pollTimeout) offset
+    Right updates =>
+      let maxId = foldl max offset (map updateId updates)
+          nextOffset = maxId + 1
+      in
+      case findMatchingReply sentMsgId updates of
+        Just response => pure (Right response)
+        Nothing =>
+          if timeout <= pollTimeout
+            then pure (Left "Timeout")
+            else waitForTextReply cfg sentMsgId (minus timeout pollTimeout) nextOffset
+  where
+    ||| Find a text message that replies to our sent message
+    findMatchingReply : Integer -> List TgUpdate -> Maybe String
+    findMatchingReply _ [] = Nothing
+    findMatchingReply targetMsgId (MkMessageUpdate _ msg :: rest) =
+      case (msg.text, msg.replyToMessageId) of
+        (Just txt, Just replyId) =>
+          if replyId == targetMsgId
+            then Just txt
+            else findMatchingReply targetMsgId rest
+        _ => findMatchingReply targetMsgId rest
+    findMatchingReply targetMsgId (_ :: rest) = findMatchingReply targetMsgId rest

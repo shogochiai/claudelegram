@@ -9,7 +9,7 @@ Type sedimentation is a human intuition domain.
 
 ### Phase 1: Vibe Bootstrap
 
-- Run `lazy core ask --steps 4` (testandcoverage)
+- Run `lazy core ask --steps=4` (testandcoverage)
 - Select high-branch functions from recommendations
 - Write tests (Spec comes later)
 - Iterate until coverage stabilizes

@@ -243,7 +243,11 @@ parseTgMessage cs = do
         fromObj <- findObjectField "from" cs
         parseTgUser fromObj
   let text = findStringField "text" cs
-  pure $ MkTgMessage messageId mFrom chat date text Nothing
+  -- Extract reply_to_message.message_id if present
+  let replyToMsgId = do
+        replyObj <- findObjectField "reply_to_message" cs
+        findIntField "message_id" replyObj
+  pure $ MkTgMessage messageId mFrom chat date text replyToMsgId
 
 ||| Parse a TgCallbackQuery from object contents
 parseTgCallbackQuery : List Char -> Maybe TgCallbackQuery

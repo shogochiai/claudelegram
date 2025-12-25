@@ -36,7 +36,7 @@ record TgMessage where
   chat : TgChat
   date : Integer
   text : Maybe String
-  replyToMessage : Maybe (Lazy TgMessage)
+  replyToMessageId : Maybe Integer  -- message_id of the replied message (for reply matching)
 
 ||| Callback Query (for inline keyboard buttons)
 public export

@@ -31,7 +31,8 @@ mergeOptions cfg opts =
   } cfg
 
 ||| Execute notify command (one-shot interaction)
-||| Sends message with choices, waits for callback response matching CID
+||| With choices: waits for callback response matching CID
+||| Without choices: waits for text reply to the sent message
 execNotify : Config -> String -> Maybe (List String) -> IO ()
 execNotify cfg reason mChoices = do
   -- Create one-shot interaction (generates CID)
@@ -44,7 +45,6 @@ execNotify cfg reason mChoices = do
   let message = "\{tag}\n\n\{reason}"
 
   -- Send message (with or without choices)
-  -- Note: Without choices, we send but don't wait (one-way message)
   result <- the (IO (Either String Integer)) $ case mChoices of
     Nothing => sendTextMessage cfg.botToken cfg.chatId message
     Just choices => sendChoiceMessage cfg.botToken cfg.chatId message choices (show cid)
@@ -53,17 +53,26 @@ execNotify cfg reason mChoices = do
     Left err => do
       putStrLn $ "Error sending message: \{err}"
       exitWith (ExitFailure 1)
-    Right _ => do
-      putStrLn $ "Notification sent: \{show cid}"
+    Right sentMsgId => do
+      putStrLn $ "Notification sent: \{show cid} (message_id=\{show sentMsgId})"
 
-      -- Only wait for response if choices were provided
       case mChoices of
         Nothing => do
-          putStrLn "One-way message sent (no choices, not waiting)"
-          pure ()
+          -- No choices: wait for text reply to our message
+          putStrLn "Waiting for text reply..."
+          replyResult <- waitForTextReply cfg sentMsgId (cfg.pollTimeout * 2) 0
+
+          case replyResult of
+            Left err => do
+              putStrLn $ "Error waiting for reply: \{err}"
+              exitWith (ExitFailure 1)
+            Right resp => do
+              -- Output response to stdout (caller can capture this)
+              putStrLn resp
+
         Just _ => do
-          -- Wait for response using one-shot interaction
-          putStrLn "Waiting for response..."
+          -- With choices: wait for callback response using CID
+          putStrLn "Waiting for button response..."
           responseResult <- await1 interaction cfg
 
           case responseResult of

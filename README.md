@@ -7,36 +7,40 @@ When Claude wants to run a command, you get a Telegram notification with Allow/D
 ## Quick Start
 
 ```bash
-# Build
+# Build and install
 git clone https://github.com/user/claudelegram
 cd claudelegram
-pack build claudelegram
+sudo make install
 
-# Setup (interactive wizard)
-./build/exec/claudelegram init
+# In your project directory
+claudelegram init
 ```
 
-The `init` wizard guides you through:
-1. Creating a Telegram bot
-2. Getting your chat ID
-3. Testing the connection
-4. Configuring Claude Code hooks
+First-time users: `init` guides you through creating a Telegram bot and getting your chat ID.
+
+Returning users (env vars already set): `claudelegram init` instantly enables the project.
 
 ## How It Works
 
+**Permission Requests:**
 ```
-Claude Code wants to run `rm -rf /tmp/test`
+Claude wants to run `rm -rf /tmp/test`
     ↓
-Hook triggers claudelegram
+You get Telegram: [Allow] [Deny]
     ↓
-You get Telegram notification: [Allow] [Deny]
-    ↓
-You tap Allow
-    ↓
-Claude Code proceeds
+You tap Allow → Claude proceeds
 ```
 
-**No daemon. Each hook call = one notification = one response.**
+**Idle Prompt (Claude waiting for input):**
+```
+Claude finishes a task and waits
+    ↓
+You get Telegram: "Claude is waiting for your input"
+    ↓
+You reply with instructions → Claude continues
+```
+
+**No daemon. Each hook = one notification = one response.**
 
 ## Manual Setup
 

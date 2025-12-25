@@ -117,94 +117,39 @@ validateConnection token chatId = do
       putStrLn "Please check your token and chat ID."
       pure False
 
-||| Step 4: Select hook patterns
-data HookPattern = HPPreToolBash | HPPreToolEdit | HPPreToolWrite | HPPreToolAll
-                 | HPPostTool | HPNotification
-
-Show HookPattern where
-  show HPPreToolBash = "PreToolUse:Bash"
-  show HPPreToolEdit = "PreToolUse:Edit"
-  show HPPreToolWrite = "PreToolUse:Write"
-  show HPPreToolAll = "PreToolUse:*"
-  show HPPostTool = "PostToolUse"
-  show HPNotification = "Notification"
-
-selectHookPatterns : IO (List HookPattern)
-selectHookPatterns = do
-  printHeader "Step 4: Select Hook Patterns"
-  putStrLn "Which events should trigger Telegram notifications?"
-  putStrLn ""
-
-  preBash <- promptYN "  [PreToolUse:Bash] Approve shell commands?" True
-  preEdit <- promptYN "  [PreToolUse:Edit] Approve file edits?" False
-  preWrite <- promptYN "  [PreToolUse:Write] Approve new file creation?" False
-  postTool <- promptYN "  [PostToolUse] Notify after tool completion?" False
-
-  let patterns = (if preBash then [HPPreToolBash] else [])
-              ++ (if preEdit then [HPPreToolEdit] else [])
-              ++ (if preWrite then [HPPreToolWrite] else [])
-              ++ (if postTool then [HPPostTool] else [])
-
-  pure patterns
-
 -- =============================================================================
 -- Config Generation
 -- =============================================================================
 
-||| Get event and matcher for a hook pattern
-patternToEventMatcher : HookPattern -> (String, String)
-patternToEventMatcher HPPreToolBash = ("PreToolUse", "Bash")
-patternToEventMatcher HPPreToolEdit = ("PreToolUse", "Edit")
-patternToEventMatcher HPPreToolWrite = ("PreToolUse", "Write")
-patternToEventMatcher HPPreToolAll = ("PreToolUse", "*")
-patternToEventMatcher HPPostTool = ("PostToolUse", "*")
-patternToEventMatcher HPNotification = ("Notification", "*")
-
-||| Generate hook JSON for a single pattern
-generateHookEntry : String -> HookPattern -> String
-generateHookEntry cmdPath pattern =
-  let (event, matcher) = patternToEventMatcher pattern
-  in "      {\n" ++
-     "        \"matcher\": \"" ++ matcher ++ "\",\n" ++
-     "        \"hooks\": [\n" ++
-     "          {\n" ++
-     "            \"type\": \"command\",\n" ++
-     "            \"command\": \"" ++ cmdPath ++ " hook " ++ event ++ "\"\n" ++
-     "          }\n" ++
-     "        ]\n" ++
-     "      }"
-
-||| Group patterns by event type
-groupByEvent : List HookPattern -> List (String, List HookPattern)
-groupByEvent patterns =
-  let pre = filter isPre patterns
-      post = filter isPost patterns
-  in (if null pre then [] else [("PreToolUse", pre)])
-  ++ (if null post then [] else [("PostToolUse", post)])
-  where
-    isPre : HookPattern -> Bool
-    isPre HPPreToolBash = True
-    isPre HPPreToolEdit = True
-    isPre HPPreToolWrite = True
-    isPre HPPreToolAll = True
-    isPre _ = False
-
-    isPost : HookPattern -> Bool
-    isPost HPPostTool = True
-    isPost _ = False
-
 ||| Generate full settings.local.json content
-generateSettingsJson : String -> List HookPattern -> String
-generateSettingsJson cmdPath patterns =
-  let hookEntries = map (generateHookEntry cmdPath) patterns
-      entriesStr = joinBy ",\n    " hookEntries
-  in "{\n" ++
-     "  \"hooks\": {\n" ++
-     "    \"PreToolUse\": [\n" ++
-     "    " ++ entriesStr ++ "\n" ++
-     "    ]\n" ++
-     "  }\n" ++
-     "}\n"
+generateSettingsJson : String
+generateSettingsJson =
+  "{\n" ++
+  "  \"hooks\": {\n" ++
+  "    \"PermissionRequest\": [\n" ++
+  "      {\n" ++
+  "        \"matcher\": \"*\",\n" ++
+  "        \"hooks\": [\n" ++
+  "          {\n" ++
+  "            \"type\": \"command\",\n" ++
+  "            \"command\": \"claudelegram hook PreToolUse\"\n" ++
+  "          }\n" ++
+  "        ]\n" ++
+  "      }\n" ++
+  "    ],\n" ++
+  "    \"Notification\": [\n" ++
+  "      {\n" ++
+  "        \"matcher\": \"idle_prompt\",\n" ++
+  "        \"hooks\": [\n" ++
+  "          {\n" ++
+  "            \"type\": \"command\",\n" ++
+  "            \"command\": \"claudelegram hook Notification\"\n" ++
+  "          }\n" ++
+  "        ]\n" ++
+  "      }\n" ++
+  "    ]\n" ++
+  "  }\n" ++
+  "}\n"
 
 ||| Generate shell exports for environment variables
 generateEnvExports : String -> Integer -> String
@@ -260,16 +205,11 @@ runInit = do
   existingToken <- getEnvVar "TELEGRAM_BOT_TOKEN"
   existingChatId <- getEnvVar "TELEGRAM_CHAT_ID"
 
-  -- Get token (use existing or prompt)
+  -- Get token (use existing automatically, or prompt)
   token <- case existingToken of
     Just t => do
-      printGreen $ "Found TELEGRAM_BOT_TOKEN in environment"
-      useExisting <- promptYN "Use existing token?" True
-      if useExisting
-        then pure t
-        else do
-          showBotSetupGuide
-          prompt "Enter your bot token: "
+      printGreen "Found TELEGRAM_BOT_TOKEN in environment"
+      pure t
     Nothing => do
       showBotSetupGuide
       _ <- prompt "Press Enter when you have your bot token..."
@@ -279,16 +219,11 @@ runInit = do
     printRed "Token is required. Aborting."
     exitWith (ExitFailure 1)
 
-  -- Get chat ID (use existing or prompt)
+  -- Get chat ID (use existing automatically, or prompt)
   chatIdStr : String <- case existingChatId of
     Just c => do
       printGreen $ "Found TELEGRAM_CHAT_ID in environment: " ++ c
-      useExisting <- promptYN "Use existing chat ID?" True
-      if useExisting
-        then pure c
-        else do
-          showChatIdGuide
-          prompt "Enter your chat ID: "
+      pure c
     Nothing => do
       showChatIdGuide
       _ <- prompt "Press Enter when you have your chat ID..."
@@ -299,61 +234,39 @@ runInit = do
     printRed "Invalid chat ID. Aborting."
     exitWith (ExitFailure 1)
 
-  -- Step 3: Validate connection
+  -- Validate connection
   valid <- validateConnection token chatId
   unless valid $ do
     retry <- promptYN "Would you like to re-enter credentials?" True
     unless retry $ exitWith (ExitFailure 1)
     runInit  -- Restart
 
-  -- Step 4: Select patterns
-  patterns <- selectHookPatterns
-
-  when (null patterns) $ do
-    printYellow "No patterns selected. You can add them manually later."
-
-  -- Step 5: Generate configs
-  printHeader "Step 5: Generate Configuration"
-
-  -- Get claudelegram executable path (not the .so, the actual executable)
-  putStrLn "Enter the FULL path to claudelegram executable."
-  putStrLn "This is what Claude Code hooks will call."
-  putStrLn ""
-  finalCmdPath <- promptDefault "claudelegram executable path" "/Users/bob/code/claudelegram/build/exec/claudelegram"
-
-  -- Get project path where .claude/settings.local.json should be created
-  putStrLn ""
-  putStrLn "Enter the project directory where you want to add Claude Code hooks."
-  putStrLn "(This is where .claude/settings.local.json will be created)"
-  putStrLn ""
-  projectPath <- promptDefault "Target project path" "."
-
-  -- Generate and write settings
-  let settingsContent = generateSettingsJson finalCmdPath patterns
+  -- Generate and write settings (always to current directory)
+  printHeader "Generate Configuration"
+  let settingsContent = generateSettingsJson
 
   putStrLn ""
   putStrLn "Generated settings.local.json:"
   printYellow settingsContent
 
-  proceed <- promptYN "Write this configuration?" True
-  when proceed $ do
-    result <- writeSettings projectPath settingsContent
-    case result of
-      Right () => printGreen $ "✓ Written to " ++ projectPath ++ "/.claude/settings.local.json"
-      Left err => printRed err
+  result <- writeSettings "." settingsContent
+  case result of
+    Right () => printGreen "✓ Written to .claude/settings.local.json"
+    Left err => printRed err
 
-  -- Show env exports
-  printHeader "Step 6: Environment Variables"
-  putStrLn "Add these to your shell profile (~/.bashrc, ~/.zshrc, etc.):"
-  putStrLn ""
-  printYellow $ generateEnvExports token chatId
+  -- Show env exports only if not already set
+  when (isNothing existingToken || isNothing existingChatId) $ do
+    printHeader "Environment Variables"
+    putStrLn "Add these to your shell profile (~/.bashrc, ~/.zshrc, etc.):"
+    putStrLn ""
+    printYellow $ generateEnvExports token chatId
 
   -- Done
   printHeader "Setup Complete!"
-  putStrLn "Next steps:"
-  putStrLn "  1. Add the environment variables to your shell"
-  putStrLn "  2. Restart your terminal or run: source ~/.bashrc"
-  putStrLn "  3. Start Claude Code in your project directory"
-  putStrLn "  4. When Claude uses a hooked tool, you'll get a Telegram notification"
-  putStrLn ""
-  printGreen "Happy coding with human-in-the-loop! 🚀"
+  when (isNothing existingToken || isNothing existingChatId) $ do
+    putStrLn "Next steps:"
+    putStrLn "  1. Add the environment variables to your shell"
+    putStrLn "  2. Restart your terminal or run: source ~/.bashrc"
+    putStrLn "  3. Start Claude Code in this project directory"
+    putStrLn ""
+  printGreen "This project is now Telegram-enabled!"

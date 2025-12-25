@@ -1,5 +1,6 @@
 ||| Hook Module
 ||| Claude Code hook integration - reads stdin, sends Telegram, outputs JSON
+||| Type-safe: each HookEvent has its own input/output types
 module Claudelegram.Hook
 
 import Claudelegram.Config
@@ -9,23 +10,67 @@ import Claudelegram.Interaction
 import Claudelegram.Telegram.Types
 import Claudelegram.Telegram.Api
 import Claudelegram.Telegram.JsonParser
+import Claudelegram.Telegram.LongPoll
 import Data.String
 import Data.List
+import Data.List1
+import Data.Maybe
 import System
 import System.File
 
 %default covering
 
 -- =============================================================================
--- Hook Input Parsing (from Claude Code stdin)
+-- Hook Input Types (type-indexed by HookEvent)
 -- =============================================================================
 
-||| Parsed hook input from Claude Code
+||| Type-indexed hook input - each event has its own structure
 public export
-record HookInput where
-  constructor MkHookInput
-  toolName : String
-  toolInput : String
+data HookInput : HookEvent -> Type where
+  ||| PreToolUse input: tool being executed
+  MkPreToolUseInput : (toolName : String)
+                    -> (toolInput : String)
+                    -> (cwd : String)
+                    -> (command : Maybe String)
+                    -> HookInput PreToolUse
+  ||| PostToolUse input: tool that was executed
+  MkPostToolUseInput : (toolName : String)
+                     -> (toolInput : String)
+                     -> (cwd : String)
+                     -> HookInput PostToolUse
+  ||| Notification input: message and type
+  MkNotificationInput : (notificationType : String)
+                      -> (message : String)
+                      -> (cwd : String)
+                      -> HookInput Notification
+
+-- =============================================================================
+-- Hook Output Types (type-indexed by HookEvent)
+-- =============================================================================
+
+||| Permission decision for PreToolUse hooks
+public export
+data PermissionDecision = Allow | Deny | Ask
+
+export
+Show PermissionDecision where
+  show Allow = "allow"
+  show Deny = "deny"
+  show Ask = "ask"
+
+||| Type-indexed hook output - ensures correct output for each event
+public export
+data HookOutput : HookEvent -> Type where
+  ||| PreToolUse output: permission decision
+  MkPreToolUseOutput : PermissionDecision -> Maybe String -> HookOutput PreToolUse
+  ||| PostToolUse output: acknowledgment
+  MkPostToolUseOutput : HookOutput PostToolUse
+  ||| Notification output: optional user response
+  MkNotificationOutput : Maybe String -> HookOutput Notification
+
+-- =============================================================================
+-- JSON Parsing Helpers
+-- =============================================================================
 
 ||| Simple JSON string extraction - find value after "key":
 ||| Just looks for "key":" and extracts until next "
@@ -56,27 +101,41 @@ extractJsonStringSimple key json =
           then Just n
           else go (S n) rest
 
-||| Parse hook input JSON from stdin
-||| Claude Code sends: {"tool_name": "Bash", "tool_input": {"command": "ls -la"}}
-parseHookInput : String -> Maybe HookInput
-parseHookInput json = do
-  toolName <- extractJsonStringSimple "tool_name" json
-  -- For tool_input, just include raw json as context (simplified)
-  pure $ MkHookInput toolName json
+||| Extract project name from cwd path (last component)
+extractProjectName : String -> String
+extractProjectName path =
+  let parts = forget $ split (== '/') path
+  in case last' parts of
+       Just name => if name == "" then "unknown" else name
+       Nothing => "unknown"
 
 -- =============================================================================
--- Hook Output Generation (to Claude Code stdout)
+-- Type-Safe Hook Input Parsing
 -- =============================================================================
 
-||| Permission decision for PreToolUse hooks
-public export
-data PermissionDecision = Allow | Deny | Ask
-
+||| Parse hook input JSON - returns type-indexed input based on event
+||| PreToolUse expects tool_name, PostToolUse expects tool_name,
+||| Notification expects notification_type and message
 export
-Show PermissionDecision where
-  show Allow = "allow"
-  show Deny = "deny"
-  show Ask = "ask"
+parseHookInput : (event : HookEvent) -> String -> Maybe (HookInput event)
+parseHookInput PreToolUse json = do
+  toolName <- extractJsonStringSimple "tool_name" json
+  let cwd = fromMaybe "." $ extractJsonStringSimple "cwd" json
+  let cmd = extractJsonStringSimple "command" json
+  pure $ MkPreToolUseInput toolName json cwd cmd
+parseHookInput PostToolUse json = do
+  toolName <- extractJsonStringSimple "tool_name" json
+  let cwd = fromMaybe "." $ extractJsonStringSimple "cwd" json
+  pure $ MkPostToolUseInput toolName json cwd
+parseHookInput Notification json =
+  let notifType = fromMaybe "unknown" $ extractJsonStringSimple "notification_type" json
+      message = fromMaybe "" $ extractJsonStringSimple "message" json
+      cwd = fromMaybe "." $ extractJsonStringSimple "cwd" json
+  in Just $ MkNotificationInput notifType message cwd
+
+-- =============================================================================
+-- Type-Safe Hook Output Serialization
+-- =============================================================================
 
 ||| Escape JSON string
 escapeJsonString : String -> String
@@ -90,21 +149,21 @@ escapeJsonString s = pack $ concatMap escape (unpack s)
     escape '\t' = ['\\', 't']
     escape c = [c]
 
-||| Generate hook output JSON for PreToolUse
-||| Format: {"hookSpecificOutput":{"permissionDecision":"allow"}}
-generatePreToolOutput : PermissionDecision -> Maybe String -> String
-generatePreToolOutput decision mReason =
+||| Serialize hook output to JSON - type ensures correct format
+export
+serializeOutput : HookOutput event -> String
+serializeOutput (MkPreToolUseOutput decision mReason) =
   let reasonPart = case mReason of
         Nothing => ""
         Just r => ",\"permissionDecisionReason\":\"" ++ escapeJsonString r ++ "\""
-  in "{\"hookSpecificOutput\":{\"permissionDecision\":\"" ++ show decision ++ "\"" ++ reasonPart ++ "}}"
-
-||| Generate hook output JSON for PostToolUse (acknowledgment only)
-generatePostToolOutput : String
-generatePostToolOutput = "{\"hookSpecificOutput\":{}}"
+  in "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"" ++ show decision ++ "\"" ++ reasonPart ++ "}}"
+serializeOutput MkPostToolUseOutput = "{\"hookSpecificOutput\":{}}"
+serializeOutput (MkNotificationOutput Nothing) = "{\"continue\":true}"
+serializeOutput (MkNotificationOutput (Just response)) =
+  "{\"continue\":true,\"stopReason\":\"" ++ escapeJsonString response ++ "\"}"
 
 -- =============================================================================
--- Hook Execution
+-- Hook Execution Helpers
 -- =============================================================================
 
 ||| Read all stdin
@@ -123,16 +182,6 @@ truncateStr maxLen s =
      then pack (take maxLen chars) ++ "..."
      else s
 
-||| Format tool info for Telegram message
-formatToolMessage : HookEvent -> HookInput -> String
-formatToolMessage event input =
-  let eventStr = case event of
-        PreToolUse => "Tool Request"
-        PostToolUse => "Tool Completed"
-        Notification => "Notification"
-      preview = truncateStr 200 input.toolInput
-  in eventStr ++ "\n\nTool: " ++ input.toolName ++ "\n\n```\n" ++ preview ++ "\n```"
-
 ||| Map user choice to permission decision
 choiceToDecision : String -> PermissionDecision
 choiceToDecision choice =
@@ -148,90 +197,84 @@ choiceToDecision choice =
     "n" => Deny
     _ => Ask
 
-||| Execute PreToolUse hook
-||| Send notification, wait for response, output permission JSON
-execPreToolUse : Config -> HookInput -> IO ()
-execPreToolUse cfg input = do
+-- =============================================================================
+-- Type-Safe Hook Execution
+-- =============================================================================
+
+||| Execute hook and return type-indexed output
+||| The type system ensures we return the correct output type for each event
+export
+execHook : Config -> HookInput event -> IO (HookOutput event)
+execHook cfg (MkPreToolUseInput toolName toolInput cwd cmd) = do
   -- Create interaction for one-shot response
   interaction <- mkInteraction cfg (cfg.pollTimeout * 2)
-  let cid = getCid interaction
+  let cidVal = getCid interaction
   let agent = mkAgentId cfg.agentName Nothing
-  let tag = formatAgentTag agent cid
-
-  -- Format and send message
-  let message = tag ++ "\n\n" ++ formatToolMessage PreToolUse input
+  let tag = formatAgentTag agent cidVal
+  let projectName = extractProjectName cwd
+  let toolInfo = case cmd of
+        Just c => truncateStr 300 c
+        Nothing => truncateStr 200 toolInput
+  let message = tag ++ "\n\n" ++ projectName ++ " | " ++ toolName ++ "\n\n" ++ toolInfo
   let choices = ["Allow", "Deny"]
 
-  result <- sendChoiceMessage cfg.botToken cfg.chatId message choices (show cid)
-
+  result <- sendChoiceMessage cfg.botToken cfg.chatId message choices (show cidVal)
   case result of
-    Left err => do
-      -- On error, default to "ask" (let user decide in CLI)
-      putStrLn $ generatePreToolOutput Ask (Just ("Telegram error: " ++ err))
+    Left err => pure $ MkPreToolUseOutput Ask (Just ("Telegram error: " ++ err))
     Right _ => do
-      -- Wait for response
       responseResult <- await1 interaction cfg
-
       case responseResult of
-        Left err => do
-          -- Timeout or error, default to "ask"
-          putStrLn $ generatePreToolOutput Ask (Just ("Timeout: " ++ err))
-        Right (choice, _) => do
-          let decision = choiceToDecision choice
-          putStrLn $ generatePreToolOutput decision Nothing
+        Left err => pure $ MkPreToolUseOutput Ask (Just ("Timeout: " ++ err))
+        Right (choice, _) => pure $ MkPreToolUseOutput (choiceToDecision choice) Nothing
 
-||| Execute PostToolUse hook
-||| Send notification only (no response needed)
-execPostToolUse : Config -> HookInput -> IO ()
-execPostToolUse cfg input = do
+execHook cfg (MkPostToolUseInput toolName toolInput cwd) = do
   let agent = mkAgentId cfg.agentName Nothing
-  cid <- newCorrelationId cfg.agentName 0
-  let tag = formatAgentTag agent cid
-
-  let message = tag ++ "\n\n" ++ formatToolMessage PostToolUse input
-
+  cidVal <- newCorrelationId cfg.agentName 0
+  let tag = formatAgentTag agent cidVal
+  let projectName = extractProjectName cwd
+  let message = tag ++ "\n\n" ++ projectName ++ " | " ++ toolName ++ "\n\n" ++ truncateStr 200 toolInput
   _ <- sendTextMessage cfg.botToken cfg.chatId message
+  pure MkPostToolUseOutput
 
-  -- Output empty hook response
-  putStrLn generatePostToolOutput
-
-||| Execute Notification hook
-||| One-way message, no response
-execNotification : Config -> HookInput -> IO ()
-execNotification cfg input = do
+execHook cfg (MkNotificationInput notifType msg cwd) = do
   let agent = mkAgentId cfg.agentName Nothing
-  cid <- newCorrelationId cfg.agentName 0
-  let tag = formatAgentTag agent cid
-
-  let message = tag ++ "\n\n" ++ formatToolMessage Notification input
-
-  _ <- sendTextMessage cfg.botToken cfg.chatId message
-
-  -- Output empty hook response
-  putStrLn generatePostToolOutput
+  cidVal <- newCorrelationId cfg.agentName 0
+  let tag = formatAgentTag agent cidVal
+  let projectName = extractProjectName cwd
+  -- Use friendly message for known notification types
+  let displayMsg = case (notifType, msg == "") of
+        ("idle_prompt", True) => "Claude is waiting for your input"
+        _ => msg
+  let message = tag ++ "\n\n" ++ projectName ++ " | " ++ notifType ++ "\n\n" ++ displayMsg
+  result <- sendTextMessage cfg.botToken cfg.chatId message
+  case result of
+    Left _ => pure $ MkNotificationOutput Nothing
+    Right msgId => do
+      replyResult <- waitForTextReply cfg msgId (cast cfg.pollTimeout) 0
+      case replyResult of
+        Left _ => pure $ MkNotificationOutput Nothing
+        Right replyText => pure $ MkNotificationOutput (Just replyText)
 
 -- =============================================================================
 -- Main Hook Entry Point
 -- =============================================================================
 
-||| Run hook command
-||| Reads tool info from stdin, sends Telegram notification, outputs JSON
+||| Run hook command - type-safe dispatch
+||| Parses input according to event type, executes, and serializes output
 export
 runHook : Config -> HookEvent -> IO ()
 runHook cfg event = do
-  -- Read hook input from stdin
   stdinContent <- readStdin
-
-  -- Parse input
-  case parseHookInput stdinContent of
-    Nothing => do
-      -- If we can't parse, just pass through (allow)
-      case event of
-        PreToolUse => putStrLn $ generatePreToolOutput Allow (Just "Could not parse hook input")
-        _ => putStrLn generatePostToolOutput
-
-    Just input => do
-      case event of
-        PreToolUse => execPreToolUse cfg input
-        PostToolUse => execPostToolUse cfg input
-        Notification => execNotification cfg input
+  case event of
+    PreToolUse => do
+      case parseHookInput PreToolUse stdinContent of
+        Nothing => putStrLn $ serializeOutput $ MkPreToolUseOutput Allow (Just "Could not parse hook input")
+        Just input => execHook cfg input >>= putStrLn . serializeOutput
+    PostToolUse => do
+      case parseHookInput PostToolUse stdinContent of
+        Nothing => putStrLn $ serializeOutput MkPostToolUseOutput
+        Just input => execHook cfg input >>= putStrLn . serializeOutput
+    Notification => do
+      case parseHookInput Notification stdinContent of
+        Nothing => putStrLn $ serializeOutput $ MkNotificationOutput Nothing
+        Just input => execHook cfg input >>= putStrLn . serializeOutput

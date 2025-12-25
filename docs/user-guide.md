@@ -68,13 +68,24 @@ Add to your project's `.claude/settings.local.json`:
 ```json
 {
   "hooks": {
-    "PreToolUse": [
+    "PermissionRequest": [
       {
-        "matcher": "Bash",
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "/path/to/claudelegram/build/exec/claudelegram hook PreToolUse"
+            "command": "claudelegram hook PreToolUse"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "idle_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "claudelegram hook Notification"
           }
         ]
       }
@@ -82,6 +93,10 @@ Add to your project's `.claude/settings.local.json`:
   }
 }
 ```
+
+This configuration:
+- Asks for Allow/Deny on all permission requests
+- Notifies you when Claude is idle and waiting for input (reply via Telegram)
 
 ---
 
@@ -109,23 +124,27 @@ claudelegram hook <PreToolUse|PostToolUse|Notification>
 |-------|-------------|----------|
 | `PreToolUse` | Before tool execution | Allow/Deny buttons, returns permission JSON |
 | `PostToolUse` | After tool completes | One-way notification |
-| `Notification` | System alerts | One-way notification |
+| `Notification` | System alerts (e.g., `idle_prompt`) | Waits for text reply, returns as `stopReason` |
+
+**Note:** For `idle_prompt` notifications, claudelegram sends a message and waits for your text reply. Your reply is passed back to Claude Code, allowing you to give instructions remotely via Telegram.
 
 ### notify
 
-Ask for approval with buttons. Blocks until response.
+Ask for user input. Two modes available:
 
-```bash
-claudelegram notify "message" -c "option1,option2,option3"
-```
-
-The selected option is written to stdout.
-
-**Example:**
+**Button mode** (with `-c`): Shows buttons, waits for selection.
 ```bash
 response=$(claudelegram notify "Deploy to production?" -c "yes,no,later")
 echo "User chose: $response"
 ```
+
+**Reply mode** (without `-c`): Waits for text reply.
+```bash
+response=$(claudelegram notify "What should I do next?")
+echo "User said: $response"
+```
+
+The response is written to stdout.
 
 ### send
 
@@ -167,46 +186,62 @@ claudelegram inject <session> <response>
 
 ## Claude Code Integration Patterns
 
-### Pattern 1: Approve All Bash Commands
+### Pattern 1: Approve All Permission Requests + Idle Prompt
 
 ```json
 {
   "hooks": {
-    "PreToolUse": [
+    "PermissionRequest": [
       {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/path/to/claudelegram hook PreToolUse"
-          }
-        ]
+        "matcher": "*",
+        "hooks": [{"type": "command", "command": "claudelegram hook PreToolUse"}]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "idle_prompt",
+        "hooks": [{"type": "command", "command": "claudelegram hook Notification"}]
       }
     ]
   }
 }
 ```
 
-### Pattern 2: Approve File Modifications
+### Pattern 2: Approve Only Bash Commands
 
 ```json
 {
   "hooks": {
-    "PreToolUse": [
+    "PermissionRequest": [
+      {
+        "matcher": "Bash",
+        "hooks": [{"type": "command", "command": "claudelegram hook PreToolUse"}]
+      }
+    ]
+  }
+}
+```
+
+### Pattern 3: Approve File Modifications
+
+```json
+{
+  "hooks": {
+    "PermissionRequest": [
       {
         "matcher": "Edit",
-        "hooks": [{"type": "command", "command": "/path/to/claudelegram hook PreToolUse"}]
+        "hooks": [{"type": "command", "command": "claudelegram hook PreToolUse"}]
       },
       {
         "matcher": "Write",
-        "hooks": [{"type": "command", "command": "/path/to/claudelegram hook PreToolUse"}]
+        "hooks": [{"type": "command", "command": "claudelegram hook PreToolUse"}]
       }
     ]
   }
 }
 ```
 
-### Pattern 3: Notify After Tool Completion
+### Pattern 4: Notify After Tool Completion
 
 ```json
 {
@@ -214,33 +249,7 @@ claudelegram inject <session> <response>
     "PostToolUse": [
       {
         "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/path/to/claudelegram hook PostToolUse"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-### Pattern 4: Combined (Approve Bash, Notify Others)
-
-```json
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [{"type": "command", "command": "/path/to/claudelegram hook PreToolUse"}]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "*",
-        "hooks": [{"type": "command", "command": "/path/to/claudelegram hook PostToolUse"}]
+        "hooks": [{"type": "command", "command": "claudelegram hook PostToolUse"}]
       }
     ]
   }

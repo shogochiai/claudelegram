@@ -42,14 +42,14 @@ fi
 lazy core ask <target_dir>
 
 # Phase 1 (Vibe Bootstrap): Focus on test discovery
-lazy core ask <target_dir> --steps 4
+lazy core ask <target_dir> --steps=4
 
 # Phase 2 (Spec Emergence): Bidirectional parity
-lazy core ask <target_dir> --steps 1,2,3
+lazy core ask <target_dir> --steps=1,2,3
 
 # Phase 3 (TDVC Loop): Chase Zero Gap, find implicit bugs, and Vibe More
-lazy core ask <target_dir> --steps 1,2,3,4
-lazy core ask <target_dir> --steps 5
+lazy core ask <target_dir> --steps=1,2,3,4
+lazy core ask <target_dir> --steps=5
 ```
 
 ## Interpreting Output

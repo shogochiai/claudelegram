@@ -103,10 +103,34 @@ sendMessage token req = do
     else do
       Right content <- readFile tmpFile
         | Left err => pure (Left $ "Failed to read response: " ++ show err)
-      -- Check for success
+      -- Check for success and extract message_id from result
       if isInfixOf "\"ok\":true" content
-        then pure (Right 0)  -- Success
+        then pure (Right $ extractMessageId content)
         else pure (Left $ "API error: " ++ content)
+  where
+    parseIntValue : List Char -> Maybe Integer
+    parseIntValue cs =
+      let (digits, _) = span isDigit cs
+      in if null digits then Nothing else Just (cast (pack digits))
+
+    parseIntAfterColon : List Char -> Maybe Integer
+    parseIntAfterColon [] = Nothing
+    parseIntAfterColon (':' :: rest) = parseIntValue (dropWhile (== ' ') rest)
+    parseIntAfterColon (' ' :: rest) = parseIntAfterColon rest
+    parseIntAfterColon _ = Nothing
+
+    findMessageId : List Char -> Maybe Integer
+    findMessageId [] = Nothing
+    findMessageId ('m' :: 'e' :: 's' :: 's' :: 'a' :: 'g' :: 'e' :: '_' :: 'i' :: 'd' :: '"' :: rest) =
+      parseIntAfterColon rest
+    findMessageId (_ :: rest) = findMessageId rest
+
+    ||| Extract message_id from sendMessage response
+    ||| Response format: {"ok":true,"result":{"message_id":123,...}}
+    extractMessageId : String -> Integer
+    extractMessageId json =
+      let chars = unpack json
+      in fromMaybe 0 $ findMessageId chars
 
 ||| Send a simple text message
 export
