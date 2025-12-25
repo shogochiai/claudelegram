@@ -9,11 +9,13 @@ modules = Claudelegram.Main
         , Claudelegram.Config
         , Claudelegram.Telegram.Types
         , Claudelegram.Telegram.Api
+        , Claudelegram.Telegram.JsonParser
         , Claudelegram.Telegram.LongPoll
         , Claudelegram.Injection.Tmux
         , Claudelegram.Injection.Fifo
         , Claudelegram.Agent
         , Claudelegram.Cli
+        , Claudelegram.Interaction
 
 depends = base, contrib, network
 

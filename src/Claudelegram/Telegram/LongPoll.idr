@@ -3,6 +3,7 @@ module Claudelegram.Telegram.LongPoll
 
 import Claudelegram.Telegram.Types
 import Claudelegram.Telegram.Api
+import Claudelegram.Telegram.JsonParser
 import Claudelegram.Config
 import Claudelegram.Agent
 import Data.String
@@ -70,34 +71,49 @@ runPollLoop cfg state handler = do
 
 ||| Wait for a single response (for one-shot interactions)
 ||| Returns when a matching response is received or timeout
+||| Only accepts CallbackQuery with matching CID in callback_data
 export
-waitForResponse : Config -> CorrelationId -> (timeout : Nat) -> IO (Either String String)
-waitForResponse cfg cid timeout = do
+waitForResponse : Config -> CorrelationId -> (timeout : Nat) -> (offset : Integer) -> IO (Either String String)
+waitForResponse cfg cid timeout offset = do
   -- Poll with shorter timeout for responsiveness
   let pollTimeout = min timeout 5
-  result <- getUpdates cfg.botToken 0 pollTimeout
+  result <- getUpdates cfg.botToken offset pollTimeout
 
   case result of
     Left err => pure (Left err)
     Right [] =>
       if timeout <= pollTimeout
         then pure (Left "Timeout waiting for response")
-        else waitForResponse cfg cid (minus timeout pollTimeout)
+        else waitForResponse cfg cid (minus timeout pollTimeout) offset
     Right updates =>
-      -- Look for a message that matches our CID
+      -- Calculate next offset to avoid re-reading same updates
+      let maxId = foldl max offset (map updateId updates)
+          nextOffset = maxId + 1
+      in
+      -- Look for a callback that matches our CID
       case findMatchingResponse cid updates of
         Just response => pure (Right response)
         Nothing =>
           if timeout <= pollTimeout
             then pure (Left "Timeout")
-            else waitForResponse cfg cid (minus timeout pollTimeout)
+            else waitForResponse cfg cid (minus timeout pollTimeout) nextOffset
   where
+    ||| Find a callback response matching the given CID
+    ||| Only considers CallbackQuery updates with "CID|CHOICE" format
     findMatchingResponse : CorrelationId -> List TgUpdate -> Maybe String
     findMatchingResponse _ [] = Nothing
-    findMatchingResponse cid (MkMessageUpdate _ msg :: rest) =
-      case msg.text of
-        Just t => Just t  -- Simplified - accept any message
-        Nothing => findMatchingResponse cid rest
-    findMatchingResponse cid (MkCallbackUpdate _ cb :: rest) =
-      cb.callbackData <|> findMatchingResponse cid rest
-    findMatchingResponse cid (_ :: rest) = findMatchingResponse cid rest
+    -- Ignore message updates (text replies not supported in Option A)
+    findMatchingResponse targetCid (MkMessageUpdate _ _ :: rest) =
+      findMatchingResponse targetCid rest
+    -- Check callback updates for CID match
+    findMatchingResponse targetCid (MkCallbackUpdate _ cb :: rest) =
+      case cb.callbackData of
+        Nothing => findMatchingResponse targetCid rest
+        Just data_ =>
+          case parseCallbackData data_ of
+            Nothing => findMatchingResponse targetCid rest
+            Just (cidStr, choice) =>
+              if cidStr == show targetCid
+                then Just choice
+                else findMatchingResponse targetCid rest
+    findMatchingResponse targetCid (_ :: rest) = findMatchingResponse targetCid rest

@@ -5,6 +5,7 @@ module Claudelegram.Main
 import Claudelegram.Config
 import Claudelegram.Cli
 import Claudelegram.Agent
+import Claudelegram.Interaction
 import Claudelegram.Telegram.Types
 import Claudelegram.Telegram.Api
 import Claudelegram.Telegram.LongPoll
@@ -27,11 +28,13 @@ mergeOptions cfg opts =
   , pollTimeout := fromMaybe cfg.pollTimeout opts.timeout
   } cfg
 
-||| Execute notify command
+||| Execute notify command (one-shot interaction)
+||| Sends message with choices, waits for callback response matching CID
 execNotify : Config -> String -> Maybe (List String) -> IO ()
 execNotify cfg reason mChoices = do
-  -- Generate correlation ID
-  cid <- newCorrelationId cfg.agentName 0
+  -- Create one-shot interaction (generates CID)
+  interaction <- mkInteraction cfg (cfg.pollTimeout * 2)
+  let cid = getCid interaction
   let agent = mkAgentId cfg.agentName Nothing
   let tag = formatAgentTag agent cid
 
@@ -39,9 +42,10 @@ execNotify cfg reason mChoices = do
   let message = "\{tag}\n\n\{reason}"
 
   -- Send message (with or without choices)
+  -- Note: Without choices, we send but don't wait (one-way message)
   result <- the (IO (Either String Integer)) $ case mChoices of
     Nothing => sendTextMessage cfg.botToken cfg.chatId message
-    Just choices => sendChoiceMessage cfg.botToken cfg.chatId message choices
+    Just choices => sendChoiceMessage cfg.botToken cfg.chatId message choices (show cid)
 
   case result of
     Left err => do
@@ -50,26 +54,23 @@ execNotify cfg reason mChoices = do
     Right _ => do
       putStrLn $ "Notification sent: \{show cid}"
 
-      -- Wait for response
-      putStrLn "Waiting for response..."
-      response <- waitForResponse cfg cid (cfg.pollTimeout * 2)
+      -- Only wait for response if choices were provided
+      case mChoices of
+        Nothing => do
+          putStrLn "One-way message sent (no choices, not waiting)"
+          pure ()
+        Just _ => do
+          -- Wait for response using one-shot interaction
+          putStrLn "Waiting for response..."
+          responseResult <- await1 interaction cfg
 
-      case response of
-        Left err => do
-          putStrLn $ "Error waiting for response: \{err}"
-          exitWith (ExitFailure 1)
-        Right resp => do
-          putStrLn $ "Received: \{resp}"
-
-          -- Inject response if tmux session is configured
-          case cfg.tmuxSession of
-            Nothing => pure ()
-            Just session => do
-              let target = mkTarget session
-              injectResult <- sendKeysEnter target resp
-              case injectResult of
-                Left err => putStrLn $ "Warning: injection failed: \{err}"
-                Right () => putStrLn $ "Injected to \{session}"
+          case responseResult of
+            Left err => do
+              putStrLn $ "Error waiting for response: \{err}"
+              exitWith (ExitFailure 1)
+            Right (resp, _) => do
+              -- Output response to stdout (caller can capture this)
+              putStrLn resp
 
 ||| Execute send command
 execSend : Config -> String -> IO ()

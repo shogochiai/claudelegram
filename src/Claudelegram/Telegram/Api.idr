@@ -3,6 +3,7 @@
 module Claudelegram.Telegram.Api
 
 import Claudelegram.Telegram.Types
+import Claudelegram.Telegram.JsonParser
 import Data.String
 import Data.List
 import Data.Maybe
@@ -114,14 +115,16 @@ sendTextMessage token chatId text =
   sendMessage token $ MkSendMessageRequest chatId text Nothing NoMarkup
 
 ||| Send message with inline keyboard choices
+||| Each button's callback_data contains "CID|CHOICE" for correlation
 export
 sendChoiceMessage : (token : String)
                  -> (chatId : Integer)
                  -> (text : String)
                  -> (choices : List String)
+                 -> (cid : String)
                  -> IO (Either String Integer)
-sendChoiceMessage token chatId text choices =
-  let buttons = map (\c => MkInlineKeyboardButton c (Just c) Nothing) choices
+sendChoiceMessage token chatId text choices cid =
+  let buttons = map (\c => MkInlineKeyboardButton c (Just $ cid ++ "|" ++ c) Nothing) choices
       keyboard = MkInlineKeyboardMarkup [buttons]
       markup = InlineMarkup keyboard
   in sendMessage token $ MkSendMessageRequest chatId text Nothing markup
@@ -158,8 +161,4 @@ getUpdates token offset timeout = do
       Right content <- readFile tmpFile
         | Left err => pure (Left "Failed to read response")
       -- Parse updates from JSON response
-      pure (Right $ parseUpdates content)
-  where
-    -- Simplified update parsing - real impl needs proper JSON parser
-    parseUpdates : String -> List TgUpdate
-    parseUpdates _ = []  -- Placeholder - needs JSON parsing library
+      pure (parseUpdatesJson content)
