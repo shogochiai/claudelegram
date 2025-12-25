@@ -1,0 +1,45 @@
+# Claudelegram Module Specification
+
+[definitions]
+prefix = "CLG"
+
+[[spec_area]]
+name = "One-Shot Interaction"
+
+[[spec]]
+id = "${prefix}_ONESHOT_001"
+title = "Each notify produces exactly one response"
+
+[[spec]]
+id = "${prefix}_ONESHOT_002"
+title = "Pending interaction consumed exactly once (linear types)"
+
+[[spec_area]]
+name = "CID Matching"
+
+[[spec]]
+id = "${prefix}_CID_001"
+title = "CID format is agent-timestamp-sequence"
+
+[[spec]]
+id = "${prefix}_CID_002"
+title = "Only callbacks with matching CID are accepted"
+
+[[spec]]
+id = "${prefix}_CID_003"
+title = "Concurrent notify calls do not interfere"
+
+[[spec_area]]
+name = "JSON Parsing"
+
+[[spec]]
+id = "${prefix}_JSON_001"
+title = "parseCallbackData roundtrip works"
+
+[[spec]]
+id = "${prefix}_JSON_002"
+title = "parseUpdatesJson handles empty result"
+
+[[spec]]
+id = "${prefix}_JSON_003"
+title = "parseUpdatesJson rejects ok:false"

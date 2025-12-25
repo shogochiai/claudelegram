@@ -5,17 +5,18 @@ brief = "Human-in-the-Loop Orchestration via Telegram for Local Claude Agents"
 
 sourcedir = "src"
 
-modules = Claudelegram.Main
-        , Claudelegram.Config
+modules = Claudelegram.Config
+        , Claudelegram.Agent
+        , Claudelegram.Cli
         , Claudelegram.Telegram.Types
-        , Claudelegram.Telegram.Api
         , Claudelegram.Telegram.JsonParser
+        , Claudelegram.Telegram.Api
         , Claudelegram.Telegram.LongPoll
         , Claudelegram.Injection.Tmux
         , Claudelegram.Injection.Fifo
-        , Claudelegram.Agent
-        , Claudelegram.Cli
         , Claudelegram.Interaction
+        , Claudelegram.Main
+        , Claudelegram.Tests.AllTests
 
 depends = base, contrib, network
 
