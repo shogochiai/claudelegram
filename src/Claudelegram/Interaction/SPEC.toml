@@ -1,0 +1,33 @@
+[module]
+name = "Interaction"
+description = "One-shot interaction with linear type enforcement"
+
+[invariants]
+one_shot = """
+A Pending interaction can only be awaited exactly once.
+The linear type (1 _ : Interaction Pending) enforces this at compile time.
+"""
+
+state_transition = """
+await1 : Interaction Pending -> IO (Either Error (String, Interaction Completed))
+Pending is consumed, Completed is produced. No going back.
+"""
+
+no_double_await = """
+Attempting to await the same Pending interaction twice is a compile error.
+"""
+
+no_discard = """
+A Pending interaction cannot be silently discarded without awaiting.
+Linear types enforce usage.
+"""
+
+[tested_by]
+type_system = "Linear types enforce invariants at compile time"
+integration_test = "test/integration.sh"
+
+[notes]
+implementation = """
+Uses Idris2 linear types: (1 _ : Interaction Pending)
+The '1' means the argument must be used exactly once.
+"""

@@ -1,0 +1,19 @@
+package claudelegram-test
+version = 0.1.0
+authors = "claudelegram authors"
+brief = "Property-based tests for claudelegram"
+
+sourcedir = "."
+
+modules = Test.Main
+        , Test.JsonParser
+        , Test.Agent
+        , Test.Matching
+
+depends = base
+        , contrib
+        , hedgehog
+        , claudelegram
+
+executable = claudelegram-test
+main = Test.Main

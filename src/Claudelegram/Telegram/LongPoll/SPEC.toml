@@ -1,0 +1,35 @@
+[module]
+name = "LongPoll"
+description = "Long polling with CID-matched response handling"
+
+[invariants]
+cid_matching = """
+waitForResponse only accepts CallbackQuery updates where:
+1. callbackData is present
+2. callbackData parses as "CID|CHOICE"
+3. parsed CID matches the target CID
+"""
+
+no_cross_talk = """
+Callbacks with different CIDs are ignored.
+Two concurrent notify calls will not receive each other's responses.
+"""
+
+offset_progression = """
+After receiving updates, offset advances to maxUpdateId + 1.
+This prevents reading the same update twice.
+"""
+
+message_ignored = """
+MkMessageUpdate (text messages) are ignored in Option A.
+Only MkCallbackUpdate (button presses) are considered.
+"""
+
+[tested_by]
+property_tests = "test/Test/Matching.idr"
+integration_test = "test/integration.sh"
+
+[properties]
+prop_matching_cid_extracts_choice = "Matching CID extracts correct choice"
+prop_different_cid_no_match = "Different CID does not match"
+prop_cid_uniqueness = "Each CID is unique and correctly routed"

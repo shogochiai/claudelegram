@@ -165,9 +165,30 @@ Manual test procedure:
 2. `claudelegram notify "test" -c "a,b"` → press button → verify stdout
 3. Run two `notify` calls with different CIDs → verify no cross-talk
 
+### Running Tests
+
+```bash
+# Property-based tests (requires pack)
+pack build claudelegram-test
+pack run claudelegram-test
+
+# Integration tests (requires Telegram credentials)
+export TELEGRAM_BOT_TOKEN="..."
+export TELEGRAM_CHAT_ID="..."
+./test/integration.sh
+```
+
+### Specifications
+
+SPEC.toml files document invariants for each module:
+
+- `src/Claudelegram/Agent/SPEC.toml` - CID format and parsing
+- `src/Claudelegram/Interaction/SPEC.toml` - One-shot linear type guarantees
+- `src/Claudelegram/Telegram/JsonParser/SPEC.toml` - JSON parsing properties
+- `src/Claudelegram/Telegram/LongPoll/SPEC.toml` - CID matching behavior
+
 ### Future Work
 
-- [ ] `src/*/SPEC.toml` and `src/*/Tests/` for `lazy core ask` integration
 - [ ] Webhook mode (alternative to polling)
 - [ ] Response timeout handling improvements
 

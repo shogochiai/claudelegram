@@ -1,0 +1,10 @@
+[custom.all.claudelegram]
+type   = "local"
+path   = "."
+ipkg   = "claudelegram.ipkg"
+
+[custom.all.claudelegram-test]
+type   = "local"
+path   = "test"
+ipkg   = "test.ipkg"
+test   = "test/build/exec/claudelegram-test"
