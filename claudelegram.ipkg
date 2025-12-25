@@ -1,0 +1,21 @@
+package claudelegram
+version = 0.1.0
+authors = "claudelegram authors"
+brief = "Human-in-the-Loop Orchestration via Telegram for Local Claude Agents"
+
+sourcedir = "src"
+
+modules = Claudelegram.Main
+        , Claudelegram.Config
+        , Claudelegram.Telegram.Types
+        , Claudelegram.Telegram.Api
+        , Claudelegram.Telegram.LongPoll
+        , Claudelegram.Injection.Tmux
+        , Claudelegram.Injection.Fifo
+        , Claudelegram.Agent
+        , Claudelegram.Cli
+
+depends = base, contrib, network
+
+executable = claudelegram
+main = Claudelegram.Main
