@@ -6,6 +6,8 @@ import Claudelegram.Config
 import Claudelegram.Cli
 import Claudelegram.Agent
 import Claudelegram.Interaction
+import Claudelegram.Init
+import Claudelegram.Hook
 import Claudelegram.Telegram.Types
 import Claudelegram.Telegram.Api
 import Claudelegram.Telegram.LongPoll
@@ -150,6 +152,9 @@ main = do
 
     ParseOk Version _ => putStrLn versionText
 
+    -- Init doesn't need config (it's the setup wizard)
+    ParseOk Init _ => runInit
+
     ParseOk cmd opts => do
       -- Load config from environment
       configResult <- loadConfigFromEnv
@@ -167,5 +172,7 @@ main = do
             Send message => execSend finalCfg message
             Poll => execPoll finalCfg
             Inject target response => execInject finalCfg target response
+            Init => runInit  -- Already handled above, but needed for totality
+            Hook event => runHook finalCfg event
             Help => putStrLn helpText
             Version => putStrLn versionText

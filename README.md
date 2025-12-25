@@ -1,45 +1,51 @@
 # claudelegram
 
-A Telegram CLI for getting human approval from Claude Code.
+Human-in-the-loop orchestration via Telegram for Claude Code.
 
-`notify` → notification on phone → wait for button press → return result → exit.
+When Claude wants to run a command, you get a Telegram notification with Allow/Deny buttons.
 
 ## Quick Start
 
 ```bash
 # Build
-git clone git@github.com:shogochiai/claudelegram.git
+git clone https://github.com/user/claudelegram
 cd claudelegram
-idris2 --build claudelegram.ipkg
+pack build claudelegram
 
-# Configure
-export TELEGRAM_BOT_TOKEN="your-token"
-export TELEGRAM_CHAT_ID="your-chat-id"
-
-# Use
-response=$(claudelegram notify "Deploy?" -c "yes,no")
+# Setup (interactive wizard)
+./build/exec/claudelegram init
 ```
+
+The `init` wizard guides you through:
+1. Creating a Telegram bot
+2. Getting your chat ID
+3. Testing the connection
+4. Configuring Claude Code hooks
 
 ## How It Works
 
 ```
-notify called
+Claude Code wants to run `rm -rf /tmp/test`
     ↓
-Send message with buttons to Telegram
+Hook triggers claudelegram
     ↓
-Human presses button on phone
+You get Telegram notification: [Allow] [Deny]
     ↓
-Result written to stdout
+You tap Allow
     ↓
-Process exits
+Claude Code proceeds
 ```
 
-**No daemon. One call = one response.**
+**No daemon. Each hook call = one notification = one response.**
+
+## Manual Setup
+
+If you prefer manual configuration, see [User Guide](docs/user-guide.md).
 
 ## Documentation
 
-- [User Guide](docs/user-guide.md) - Setup, commands, troubleshooting
-- [Contributor Guide](docs/contributor-guide.md) - Architecture, testing, contributing
+- [User Guide](docs/user-guide.md) - Setup, commands, hook patterns
+- [Contributor Guide](docs/contributor-guide.md) - Architecture, testing
 
 ## License
 

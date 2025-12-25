@@ -11,6 +11,32 @@ import Data.Maybe
 
 %default covering
 
+||| Hook event types for Claude Code integration
+public export
+data HookEvent : Type where
+  PreToolUse : HookEvent
+  PostToolUse : HookEvent
+  Notification : HookEvent
+
+export
+Show HookEvent where
+  show PreToolUse = "PreToolUse"
+  show PostToolUse = "PostToolUse"
+  show Notification = "Notification"
+
+export
+parseHookEvent : String -> Maybe HookEvent
+parseHookEvent "PreToolUse" = Just PreToolUse
+parseHookEvent "pretooluse" = Just PreToolUse
+parseHookEvent "pre" = Just PreToolUse
+parseHookEvent "PostToolUse" = Just PostToolUse
+parseHookEvent "posttooluse" = Just PostToolUse
+parseHookEvent "post" = Just PostToolUse
+parseHookEvent "Notification" = Just Notification
+parseHookEvent "notification" = Just Notification
+parseHookEvent "notify" = Just Notification
+parseHookEvent _ = Nothing
+
 ||| CLI Command types
 public export
 data Command : Type where
@@ -22,6 +48,10 @@ data Command : Type where
   Poll : Command
   ||| Inject response to tmux/FIFO
   Inject : (target : String) -> (response : String) -> Command
+  ||| Interactive setup wizard
+  Init : Command
+  ||| Run as Claude Code hook (reads stdin, outputs JSON)
+  Hook : (event : HookEvent) -> Command
   ||| Show help
   Help : Command
   ||| Show version
@@ -33,6 +63,8 @@ Show Command where
   show (Send msg) = "Send(\{msg})"
   show Poll = "Poll"
   show (Inject target resp) = "Inject(\{target}, \{resp})"
+  show Init = "Init"
+  show (Hook event) = "Hook(\{show event})"
   show Help = "Help"
   show Version = "Version"
 
@@ -132,6 +164,12 @@ parseArgs ("notify" :: rest) = parseNotify rest defaultCliOptions
 parseArgs ("send" :: rest) = parseSend rest defaultCliOptions
 parseArgs ("poll" :: _) = ParseOk Poll defaultCliOptions
 parseArgs ("inject" :: rest) = parseInject rest defaultCliOptions
+parseArgs ("init" :: _) = ParseOk Init defaultCliOptions
+parseArgs ("hook" :: eventStr :: rest) =
+  case parseHookEvent eventStr of
+    Just event => parseOpts rest $ ParseOk (Hook event) defaultCliOptions
+    Nothing => ParseError "Unknown hook event: \{eventStr}. Use: PreToolUse, PostToolUse, Notification"
+parseArgs ("hook" :: []) = ParseError "Missing hook event. Use: claudelegram hook <PreToolUse|PostToolUse|Notification>"
 -- Default: treat first arg as reason for notify
 parseArgs (reason :: rest) = parseNotify (reason :: rest) defaultCliOptions
 
@@ -145,6 +183,8 @@ USAGE:
     claudelegram <command> [options]
 
 COMMANDS:
+    init                Interactive setup wizard for Claude Code integration
+    hook <event>        Run as Claude Code hook (PreToolUse|PostToolUse|Notification)
     notify <reason>     Send notification and wait for response
     send <message>      Send message without waiting
     poll                Start long polling daemon
@@ -152,6 +192,11 @@ COMMANDS:
                         Inject response to tmux session
     help                Show this help
     version             Show version
+
+HOOK EVENTS:
+    PreToolUse          Approve/deny before tool execution (Bash, Edit, Write)
+    PostToolUse         Notify after tool completes
+    Notification        One-way alerts (errors, completions)
 
 OPTIONS:
     -a, --agent <name>      Agent name for tagging
@@ -172,6 +217,12 @@ ENVIRONMENT:
                             Default poll timeout
 
 EXAMPLES:
+    # First time setup
+    claudelegram init
+
+    # Use as Claude Code hook (in .claude/settings.local.json)
+    claudelegram hook PreToolUse
+
     # Send notification and wait for response
     claudelegram notify "Build failed, please check"
 

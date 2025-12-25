@@ -1,6 +1,26 @@
 # User Guide
 
-## Setup
+## Quick Start
+
+```bash
+# 1. Build
+git clone https://github.com/user/claudelegram
+cd claudelegram
+pack build claudelegram
+
+# 2. Run setup wizard
+./build/exec/claudelegram init
+```
+
+The `init` wizard will guide you through:
+1. Creating a Telegram bot via @BotFather
+2. Getting your chat ID
+3. Testing the connection
+4. Configuring Claude Code hooks
+
+---
+
+## Manual Setup
 
 ### 1. Create a Telegram Bot
 
@@ -17,18 +37,18 @@
 ### 2. Build
 
 Requirements:
-- [Idris2](https://github.com/idris-lang/Idris2) 0.8.0+
+- [pack](https://github.com/stefan-hoeck/idris2-pack) (Idris2 package manager)
 - curl
 
 ```bash
-git clone git@github.com:shogochiai/claudelegram.git
+git clone https://github.com/user/claudelegram
 cd claudelegram
-idris2 --build claudelegram.ipkg
+pack build claudelegram
 ```
 
 The executable will be at `./build/exec/claudelegram`.
 
-### 3. Configure
+### 3. Configure Environment
 
 ```bash
 export TELEGRAM_BOT_TOKEN="123456:ABC-xyz..."
@@ -41,9 +61,55 @@ export CLAUDELEGRAM_POLL_TIMEOUT="30"     # Timeout in seconds
 
 Add these to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.) for persistence.
 
+### 4. Configure Claude Code Hooks
+
+Add to your project's `.claude/settings.local.json`:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/path/to/claudelegram/build/exec/claudelegram hook PreToolUse"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
 ---
 
 ## Commands
+
+### init
+
+Interactive setup wizard. Guides you through bot creation, configuration, and hook setup.
+
+```bash
+claudelegram init
+```
+
+### hook
+
+Run as a Claude Code hook handler. Reads tool info from stdin, sends Telegram notification, outputs JSON response.
+
+```bash
+claudelegram hook <PreToolUse|PostToolUse|Notification>
+```
+
+**Hook Events:**
+
+| Event | Description | Response |
+|-------|-------------|----------|
+| `PreToolUse` | Before tool execution | Allow/Deny buttons, returns permission JSON |
+| `PostToolUse` | After tool completes | One-way notification |
+| `Notification` | System alerts | One-way notification |
 
 ### notify
 
@@ -69,6 +135,22 @@ Send a one-way message. Does not wait for response.
 claudelegram send "Build completed successfully"
 ```
 
+### poll
+
+Start long-polling daemon (for advanced use cases).
+
+```bash
+claudelegram poll
+```
+
+### inject
+
+Inject response to tmux session (for advanced use cases).
+
+```bash
+claudelegram inject <session> <response>
+```
+
 ---
 
 ## Options
@@ -83,41 +165,99 @@ claudelegram send "Build completed successfully"
 
 ---
 
-## Claude Code Integration
+## Claude Code Integration Patterns
 
-### Basic Hook
+### Pattern 1: Approve All Bash Commands
 
-Create a hook script that asks for approval:
-
-```bash
-#!/bin/bash
-# ~/.claude/hooks/before-command.sh
-
-response=$(claudelegram notify "Run: $1" -c "yes,no")
-if [ "$response" = "yes" ]; then
-  exit 0  # Allow
-else
-  exit 1  # Deny
-fi
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/path/to/claudelegram hook PreToolUse"
+          }
+        ]
+      }
+    ]
+  }
+}
 ```
 
-### Dangerous Command Filter
+### Pattern 2: Approve File Modifications
 
-```bash
-#!/bin/bash
-# Only ask for dangerous commands
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit",
+        "hooks": [{"type": "command", "command": "/path/to/claudelegram hook PreToolUse"}]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [{"type": "command", "command": "/path/to/claudelegram hook PreToolUse"}]
+      }
+    ]
+  }
+}
+```
 
-case "$1" in
-  *rm\ -rf*|*sudo*|*git\ push\ --force*)
-    response=$(claudelegram notify "⚠️ Dangerous: $1" -c "allow,deny")
-    [ "$response" = "allow" ] || exit 1
-    ;;
-esac
+### Pattern 3: Notify After Tool Completion
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/path/to/claudelegram hook PostToolUse"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### Pattern 4: Combined (Approve Bash, Notify Others)
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [{"type": "command", "command": "/path/to/claudelegram hook PreToolUse"}]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [{"type": "command", "command": "/path/to/claudelegram hook PostToolUse"}]
+      }
+    ]
+  }
+}
 ```
 
 ---
 
 ## Troubleshooting
+
+### "Configuration error: Missing TELEGRAM_BOT_TOKEN"
+
+Set environment variables before running:
+```bash
+export TELEGRAM_BOT_TOKEN="your-token"
+export TELEGRAM_CHAT_ID="your-chat-id"
+```
 
 ### "curl failed" error
 
@@ -138,13 +278,11 @@ esac
 - Check Telegram notification settings on your phone
 - Try `claudelegram send "test"` to verify basic connectivity
 
-### Wrong response received
+### Hook not triggering
 
-This shouldn't happen due to CID (Correlation ID) matching. Each request has a unique ID, and only responses matching that ID are accepted.
-
-If it does happen, please file an issue with:
-- The commands you ran
-- The debug output (set `DEBUG=1`)
+- Verify the path to claudelegram is absolute and correct
+- Check Claude Code logs for hook errors
+- Ensure the hook JSON syntax is valid
 
 ---
 
@@ -166,10 +304,10 @@ This is designed for Claude Code CLI. Claude Desktop would require a different i
 
 The response is final and immediate. Run the command again if needed.
 
+**Q: What happens if I don't respond in time?**
+
+The hook returns "ask" which tells Claude Code to prompt you in the terminal instead.
+
 **Q: How secure is this?**
 
 If your Telegram account is compromised, an attacker can approve any action. This tool is designed for convenience, not high-security environments. Use at your own risk.
-
-**Q: Can I customize the button layout?**
-
-Currently buttons are displayed in a single row. Multi-row layouts may be added in the future.
