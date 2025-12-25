@@ -16,16 +16,14 @@ Type sedimentation is a human intuition domain.
 
 ### Phase 2: Spec Emergence
 
-- Run `lazy core ask --steps 1,2` (stparity + testorphans)
+- Run `lazy core ask --steps 1,2,3` (stparity + testorphans + semantic)
 - OrphanTest detected → Add to SPEC.toml
 - SpecGap detected → Write test
 - Bidirectional consistency grows
 
-### Phase 3: Type-Driven Vibe Coding (TDVC)
+### Phase 3: Finding Untold Truth
 
-- Run `lazy core ask --steps 3,5` (stsemantic + fuzzing)
-- Recurring Spec constraints → Candidate for type sedimentation
-- Spec encoded in type → Test becomes optional
+- Run `lazy core ask --steps 5` (temporal fuzzing)
 - Fuzzing detects type boundary blind spots
 
 ## Phase Detection
