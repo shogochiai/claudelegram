@@ -2,6 +2,9 @@
 name = "JsonParser"
 description = "Minimal JSON parser for Telegram API responses"
 
+[definitions]
+prefix = "prop"
+
 [invariants]
 parseCallbackData_roundtrip = """
 For any valid CID string and choice string,
@@ -23,21 +26,21 @@ callback_data format is "CID|CHOICE" where CID is "agent-timestamp-seq"
 [tested_by]
 property_tests = "test/Test/JsonParser.idr"
 
-[properties]
-prop_parseCallbackData_roundtrip = "Roundtrip: parsing well-formed callback_data works"
-prop_parseCallbackData_rejects_no_pipe = "Rejects strings without pipe separator"
-prop_parseCallbackData_correct_split = "Correctly splits CID and choice"
-prop_parseCallbackData_empty = "Empty string returns Nothing"
-prop_parseCallbackData_single_pipe = "Single pipe returns empty parts"
-prop_parseUpdates_empty_result = "Parses empty result array"
-prop_parseUpdates_rejects_false = "Rejects ok:false responses"
-# Skip* function integration tests
-prop_skipWs_via_integration = "skipWs handles various whitespace patterns in JSON"
-prop_skipNull_via_integration = "skipNull handles null field values"
-prop_parseJsonInt_via_integration = "parseJsonInt handles large integers"
-prop_skipJsonArray_via_integration = "skipJsonArray handles nested arrays"
-prop_skipJsonObject_via_integration = "skipJsonObject handles nested objects"
-prop_skipJsonValue_all_types = "skipJsonValue handles all JSON value types"
-prop_skipObjectFields_multiple = "skipObjectFields handles multiple fields"
-prop_skipArrayElements_multiple = "skipArrayElements handles multiple array elements"
-prop_parseCallbackData_multiple_pipes = "parseCallbackData rejects strings with multiple pipes"
+specs = [
+  "[${prefix}_parseCallbackData_roundtrip] Roundtrip: parsing well-formed callback_data works",
+  "[${prefix}_parseCallbackData_rejects_no_pipe] Rejects strings without pipe separator",
+  "[${prefix}_parseCallbackData_correct_split] Correctly splits CID and choice",
+  "[${prefix}_parseCallbackData_empty] Empty string returns Nothing",
+  "[${prefix}_parseCallbackData_single_pipe] Single pipe returns empty parts",
+  "[${prefix}_parseUpdates_empty_result] Parses empty result array",
+  "[${prefix}_parseUpdates_rejects_false] Rejects ok:false responses",
+  "[${prefix}_skipWs_via_integration] skipWs handles various whitespace patterns in JSON",
+  "[${prefix}_skipNull_via_integration] skipNull handles null field values",
+  "[${prefix}_parseJsonInt_via_integration] parseJsonInt handles large integers",
+  "[${prefix}_skipJsonArray_via_integration] skipJsonArray handles nested arrays",
+  "[${prefix}_skipJsonObject_via_integration] skipJsonObject handles nested objects",
+  "[${prefix}_skipJsonValue_all_types] skipJsonValue handles all JSON value types",
+  "[${prefix}_skipObjectFields_multiple] skipObjectFields handles multiple fields",
+  "[${prefix}_skipArrayElements_multiple] skipArrayElements handles multiple array elements",
+  "[${prefix}_parseCallbackData_multiple_pipes] parseCallbackData rejects strings with multiple pipes",
+]
