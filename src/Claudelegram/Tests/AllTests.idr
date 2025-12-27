@@ -41,7 +41,7 @@ runTestSuite name tests = do
 -- CLG_JSON: JSON Parsing Tests
 -- =============================================================================
 
-||| CLG_JSON_001: parseCallbackData roundtrip works
+||| CLG_JSON_001
 test_parseCallbackData_roundtrip : IO Bool
 test_parseCallbackData_roundtrip = do
   let cid = "agent-1234567890-0"
@@ -49,7 +49,7 @@ test_parseCallbackData_roundtrip = do
   let data_ = cid ++ "|" ++ choice
   pure $ parseCallbackData data_ == Just (cid, choice)
 
-||| CLG_JSON_002: parseUpdatesJson handles empty result
+||| CLG_JSON_002
 test_parseUpdates_empty : IO Bool
 test_parseUpdates_empty = do
   let json = "{\"ok\":true,\"result\":[]}"
@@ -57,7 +57,7 @@ test_parseUpdates_empty = do
     Right [] => pure True
     _ => pure False
 
-||| CLG_JSON_003: parseUpdatesJson rejects ok:false
+||| CLG_JSON_003
 test_parseUpdates_rejects_false : IO Bool
 test_parseUpdates_rejects_false = do
   let json = "{\"ok\":false,\"description\":\"Bad Request\"}"
@@ -69,14 +69,14 @@ test_parseUpdates_rejects_false = do
 -- CLG_CID: Correlation ID Tests
 -- =============================================================================
 
-||| CLG_CID_001: CID format is agent-timestamp-sequence
+||| CLG_CID_001
 test_cid_format : IO Bool
 test_cid_format = do
   let cid = MkCorrelationId 1234567890 0 "agent"
   let shown = show cid
   pure $ isInfixOf "agent" shown && isInfixOf "-" shown
 
-||| CLG_CID_002: Only callbacks with matching CID are accepted
+||| CLG_CID_002
 test_cid_matching : IO Bool
 test_cid_matching = do
   let cid1 = "agent1-1234567890-0"
@@ -86,7 +86,7 @@ test_cid_matching = do
     Just (parsed, _) => pure $ parsed == cid1 && parsed /= cid2
     Nothing => pure False
 
-||| CLG_CID_003: parseAgentTag extracts correct parts
+||| CLG_CID_003
 test_parseAgentTag : IO Bool
 test_parseAgentTag = do
   let tag = "[agent|agent-1234567890-0]"
@@ -98,8 +98,7 @@ test_parseAgentTag = do
 -- CLG_ONESHOT: One-Shot Interaction Tests
 -- =============================================================================
 
-||| CLG_ONESHOT_001: Each notify produces exactly one response
-||| This is enforced by the protocol: CID matching ensures one response per request
+||| CLG_ONESHOT_001
 test_oneshot_single_response : IO Bool
 test_oneshot_single_response = do
   -- Verify that parseCallbackData only returns one result per callback_data
@@ -109,9 +108,7 @@ test_oneshot_single_response = do
     Just (_, choice) => pure $ choice == "yes"  -- Single response
     Nothing => pure False
 
-||| CLG_ONESHOT_002: Pending interaction consumed exactly once (linear types)
-||| This is enforced at compile-time by Idris2 linear types.
-||| The test verifies the type signature exists and compiles.
+||| CLG_ONESHOT_002
 test_oneshot_linear_types : IO Bool
 test_oneshot_linear_types = do
   -- Linear types are verified at compile time.
