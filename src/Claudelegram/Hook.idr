@@ -302,16 +302,12 @@ extractAssistantText line =
     extractUntilQuote (c :: rest) = c :: extractUntilQuote rest
 
 ||| Extract text content from a JSONL line
-||| For assistant messages: extract message.content[].text where type="text"
-||| For other lines: fall back to simple text/content extraction
+||| Only extracts from assistant messages with type="text"
 extractLineContent : String -> Maybe String
 extractLineContent line =
-  let raw = if isAssistantMessage line
-            then extractAssistantText line
-            else case extractJsonStringSimple "text" line of
-                   Just t => if t == "" then extractJsonStringSimple "content" line else Just t
-                   Nothing => extractJsonStringSimple "content" line
-  in map (stripXmlTags . unescapeJsonString) raw
+  if isAssistantMessage line
+  then map (stripXmlTags . unescapeJsonString) (extractAssistantText line)
+  else Nothing  -- Ignore non-assistant messages (tool_result, user, etc.)
 
 ||| Read transcript file and extract last N lines of content
 ||| Returns formatted excerpt of recent Claude output
@@ -322,8 +318,8 @@ readTranscriptExcerpt path maxLines = do
     Left _ => pure ""
     Right content =>
       let allLines = lines content
-          -- Take last N*2 lines (some may not have content)
-          recentLines = takeLast (maxLines * 2) allLines
+          -- Take last N*10 lines (assistant text messages are sparse among tool calls)
+          recentLines = takeLast (maxLines * 10) allLines
           -- Extract content from each line
           contents = mapMaybe extractLineContent recentLines
           -- Take last maxLines with actual content
@@ -412,7 +408,7 @@ execHook cfg (MkNotificationInput notifType msg cwd mTranscriptPath) = do
   -- For idle_prompt, show [project/cwd] + transcript excerpt
   message <- case (notifType, mTranscriptPath) of
     ("idle_prompt", Just transcriptPath) => do
-      excerpt <- readTranscriptExcerpt transcriptPath 15
+      excerpt <- readTranscriptExcerpt transcriptPath 5
       let truncatedExcerpt = truncateStr 1500 excerpt
       let projName = extractProjectFromTranscript transcriptPath
       let relCwd = case extractProjectRoot transcriptPath of
