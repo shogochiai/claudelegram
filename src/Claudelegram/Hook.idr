@@ -42,6 +42,7 @@ data HookInput : HookEvent -> Type where
   MkNotificationInput : (notificationType : String)
                       -> (message : String)
                       -> (cwd : String)
+                      -> (transcriptPath : Maybe String)
                       -> HookInput Notification
 
 -- =============================================================================
@@ -109,6 +110,43 @@ extractProjectName path =
        Just name => if name == "" then "unknown" else name
        Nothing => "unknown"
 
+||| Extract project name from transcript path
+||| e.g. /Users/bob/code/idris2-ouc/.claude/sessions/xxx.jsonl -> idris2-ouc
+extractProjectFromTranscript : String -> String
+extractProjectFromTranscript path =
+  let parts = forget $ split (== '/') path
+      -- Find index of ".claude" and get the component before it
+      findProjectName : List String -> String
+      findProjectName [] = "unknown"
+      findProjectName [_] = "unknown"
+      findProjectName (x :: y :: rest) =
+        if y == ".claude" then x else findProjectName (y :: rest)
+  in findProjectName parts
+
+||| Extract project root from transcript path
+||| e.g. /Users/bob/code/idris2-ouc/.claude/sessions/xxx.jsonl -> /Users/bob/code/idris2-ouc
+extractProjectRoot : String -> Maybe String
+extractProjectRoot path =
+  let parts = forget $ split (== '/') path
+      -- Find everything before ".claude"
+      takeBefore : List String -> List String
+      takeBefore [] = []
+      takeBefore (x :: rest) =
+        if x == ".claude" then [] else x :: takeBefore rest
+      rootParts = takeBefore parts
+  in if null rootParts then Nothing else Just ("/" ++ joinBy "/" (drop 1 rootParts))
+
+||| Make cwd relative to project root
+||| e.g. cwd=/Users/bob/code/idris2-ouc/src, root=/Users/bob/code/idris2-ouc -> src
+makeRelativeCwd : String -> String -> String
+makeRelativeCwd cwd root =
+  let rootLen = length root
+      cwdLen = length cwd
+  in if isPrefixOf root cwd && cwdLen > rootLen
+     then let rel = substr (rootLen + 1) (minus cwdLen (rootLen + 1)) cwd
+          in if rel == "" then "." else rel
+     else cwd
+
 -- =============================================================================
 -- Type-Safe Hook Input Parsing
 -- =============================================================================
@@ -131,7 +169,8 @@ parseHookInput Notification json =
   let notifType = fromMaybe "unknown" $ extractJsonStringSimple "notification_type" json
       message = fromMaybe "" $ extractJsonStringSimple "message" json
       cwd = fromMaybe "." $ extractJsonStringSimple "cwd" json
-  in Just $ MkNotificationInput notifType message cwd
+      transcriptPath = extractJsonStringSimple "transcript_path" json
+  in Just $ MkNotificationInput notifType message cwd transcriptPath
 
 -- =============================================================================
 -- Type-Safe Hook Output Serialization
@@ -161,6 +200,38 @@ serializeOutput MkPostToolUseOutput = "{\"hookSpecificOutput\":{}}"
 serializeOutput (MkNotificationOutput Nothing) = "{\"continue\":true}"
 serializeOutput (MkNotificationOutput (Just response)) =
   "{\"continue\":true,\"stopReason\":\"" ++ escapeJsonString response ++ "\"}"
+
+-- =============================================================================
+-- Transcript Reading Helpers
+-- =============================================================================
+
+||| Take last N elements from a list
+takeLast : Nat -> List a -> List a
+takeLast n xs = drop (minus (length xs) n) xs
+
+||| Extract text content from a JSONL line (looks for "text" or "content" fields)
+extractLineContent : String -> Maybe String
+extractLineContent line =
+  case extractJsonStringSimple "text" line of
+    Just t => if t == "" then extractJsonStringSimple "content" line else Just t
+    Nothing => extractJsonStringSimple "content" line
+
+||| Read transcript file and extract last N lines of content
+||| Returns formatted excerpt of recent Claude output
+readTranscriptExcerpt : String -> Nat -> IO String
+readTranscriptExcerpt path maxLines = do
+  result <- readFile path
+  case result of
+    Left _ => pure ""
+    Right content =>
+      let allLines = lines content
+          -- Take last N*2 lines (some may not have content)
+          recentLines = takeLast (maxLines * 2) allLines
+          -- Extract content from each line
+          contents = mapMaybe extractLineContent recentLines
+          -- Take last maxLines with actual content
+          finalContents = takeLast maxLines contents
+      in pure $ unlines finalContents
 
 -- =============================================================================
 -- Hook Execution Helpers
@@ -236,16 +307,27 @@ execHook cfg (MkPostToolUseInput toolName toolInput cwd) = do
   _ <- sendTextMessage cfg.botToken cfg.chatId message
   pure MkPostToolUseOutput
 
-execHook cfg (MkNotificationInput notifType msg cwd) = do
+execHook cfg (MkNotificationInput notifType msg cwd mTranscriptPath) = do
   let agent = mkAgentId cfg.agentName Nothing
   cidVal <- newCorrelationId cfg.agentName 0
   let tag = formatAgentTag agent cidVal
   let projectName = extractProjectName cwd
-  -- Use friendly message for known notification types
-  let displayMsg = case (notifType, msg == "") of
-        ("idle_prompt", True) => "Claude is waiting for your input"
-        _ => msg
-  let message = tag ++ "\n\n" ++ projectName ++ " | " ++ notifType ++ "\n\n" ++ displayMsg
+  -- For idle_prompt, show [project/cwd] + transcript excerpt
+  message <- case (notifType, mTranscriptPath) of
+    ("idle_prompt", Just transcriptPath) => do
+      excerpt <- readTranscriptExcerpt transcriptPath 15
+      let truncatedExcerpt = truncateStr 1500 excerpt
+      let projName = extractProjectFromTranscript transcriptPath
+      let relCwd = case extractProjectRoot transcriptPath of
+                     Just root => makeRelativeCwd cwd root
+                     Nothing => cwd
+      let header = "[" ++ projName ++ "/" ++ relCwd ++ "]"
+      pure $ tag ++ "\n\n" ++ header ++ "\n\n" ++ truncatedExcerpt ++ "\n---"
+    _ =>
+      let displayMsg = case (notifType, msg == "") of
+            ("idle_prompt", True) => "Claude is waiting for your input"
+            _ => msg
+      in pure $ tag ++ "\n\n" ++ projectName ++ " | " ++ notifType ++ "\n\n" ++ displayMsg
   result <- sendTextMessage cfg.botToken cfg.chatId message
   case result of
     Left _ => pure $ MkNotificationOutput Nothing
