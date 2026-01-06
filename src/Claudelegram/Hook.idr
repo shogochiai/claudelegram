@@ -167,14 +167,17 @@ extractProjectRoot path =
 
 ||| Make cwd relative to project root
 ||| e.g. cwd=/Users/bob/code/idris2-ouc/src, root=/Users/bob/code/idris2-ouc -> src
+||| e.g. cwd=/Users/bob/code/proj, root=/Users/bob/code/proj -> .
 makeRelativeCwd : String -> String -> String
 makeRelativeCwd cwd root =
   let rootLen = length root
       cwdLen = length cwd
-  in if isPrefixOf root cwd && cwdLen > rootLen
-     then let rel = substr (rootLen + 1) (minus cwdLen (rootLen + 1)) cwd
-          in if rel == "" then "." else rel
-     else cwd
+  in if cwd == root
+     then "."
+     else if isPrefixOf root cwd && cwdLen > rootLen
+          then let rel = substr (rootLen + 1) (minus cwdLen (rootLen + 1)) cwd
+               in if rel == "" then "." else rel
+          else cwd
 
 -- =============================================================================
 -- Type-Safe Hook Input Parsing
