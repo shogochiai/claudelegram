@@ -209,12 +209,37 @@ serializeOutput (MkNotificationOutput (Just response)) =
 takeLast : Nat -> List a -> List a
 takeLast n xs = drop (minus (length xs) n) xs
 
+||| Unescape JSON string (convert \n, \t, etc. to actual characters)
+unescapeJsonString : String -> String
+unescapeJsonString s = pack $ go (unpack s)
+  where
+    go : List Char -> List Char
+    go [] = []
+    go ('\\' :: 'n' :: rest) = '\n' :: go rest
+    go ('\\' :: 't' :: rest) = '\t' :: go rest
+    go ('\\' :: 'r' :: rest) = '\r' :: go rest
+    go ('\\' :: '"' :: rest) = '"' :: go rest
+    go ('\\' :: '\\' :: rest) = '\\' :: go rest
+    go (c :: rest) = c :: go rest
+
+||| Strip XML tags from string (e.g. <status>foo</status> -> foo)
+stripXmlTags : String -> String
+stripXmlTags s = pack $ go False (unpack s)
+  where
+    go : Bool -> List Char -> List Char
+    go _ [] = []
+    go False ('<' :: rest) = go True rest  -- Start skipping tag
+    go True ('>' :: rest) = go False rest   -- End skipping tag
+    go True (_ :: rest) = go True rest      -- Skip tag content
+    go False (c :: rest) = c :: go False rest  -- Keep non-tag content
+
 ||| Extract text content from a JSONL line (looks for "text" or "content" fields)
 extractLineContent : String -> Maybe String
 extractLineContent line =
-  case extractJsonStringSimple "text" line of
-    Just t => if t == "" then extractJsonStringSimple "content" line else Just t
-    Nothing => extractJsonStringSimple "content" line
+  let raw = case extractJsonStringSimple "text" line of
+              Just t => if t == "" then extractJsonStringSimple "content" line else Just t
+              Nothing => extractJsonStringSimple "content" line
+  in map (stripXmlTags . unescapeJsonString) raw
 
 ||| Read transcript file and extract last N lines of content
 ||| Returns formatted excerpt of recent Claude output
