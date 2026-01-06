@@ -111,30 +111,59 @@ extractProjectName path =
        Nothing => "unknown"
 
 ||| Extract project name from transcript path
-||| e.g. /Users/bob/code/idris2-ouc/.claude/sessions/xxx.jsonl -> idris2-ouc
+||| Handles two formats:
+||| 1. /Users/bob/code/proj/.claude/sessions/xxx.jsonl -> proj
+||| 2. ~/.claude/projects/-Users-bob-code-proj/xxx.jsonl -> proj
 extractProjectFromTranscript : String -> String
 extractProjectFromTranscript path =
   let parts = forget $ split (== '/') path
-      -- Find index of ".claude" and get the component before it
-      findProjectName : List String -> String
-      findProjectName [] = "unknown"
-      findProjectName [_] = "unknown"
-      findProjectName (x :: y :: rest) =
-        if y == ".claude" then x else findProjectName (y :: rest)
-  in findProjectName parts
+  in case findProjectDir parts of
+       Just projDir =>
+         -- If it looks like encoded path (-Users-bob-code-proj), decode it
+         if isPrefixOf "-" projDir
+         then let decoded = forget $ split (== '-') projDir
+              in fromMaybe "unknown" (last' decoded)
+         else projDir
+       Nothing => "unknown"
+  where
+    findProjectDir : List String -> Maybe String
+    findProjectDir [] = Nothing
+    findProjectDir [_] = Nothing
+    findProjectDir [_, _] = Nothing
+    findProjectDir (x :: y :: z :: rest) =
+      -- Case 1: .claude/projects/<proj-dir>/...
+      if x == ".claude" && y == "projects" then Just z
+      -- Case 2: <proj>/.claude/... (but not .claude/projects)
+      else if y == ".claude" && z /= "projects" then Just x
+      else findProjectDir (y :: z :: rest)
+
+||| Decode encoded project path (e.g. -Users-bob-code-proj -> /Users/bob/code/proj)
+decodeProjectPath : String -> String
+decodeProjectPath s =
+  if isPrefixOf "-" s
+  then pack $ map (\c => if c == '-' then '/' else c) (unpack s)
+  else s
 
 ||| Extract project root from transcript path
 ||| e.g. /Users/bob/code/idris2-ouc/.claude/sessions/xxx.jsonl -> /Users/bob/code/idris2-ouc
+||| For ~/.claude/projects/ format, decode the path
 extractProjectRoot : String -> Maybe String
 extractProjectRoot path =
   let parts = forget $ split (== '/') path
-      -- Find everything before ".claude"
-      takeBefore : List String -> List String
-      takeBefore [] = []
-      takeBefore (x :: rest) =
-        if x == ".claude" then [] else x :: takeBefore rest
-      rootParts = takeBefore parts
-  in if null rootParts then Nothing else Just ("/" ++ joinBy "/" (drop 1 rootParts))
+  in findRoot parts
+  where
+    findRoot : List String -> Maybe String
+    findRoot [] = Nothing
+    findRoot [_] = Nothing
+    findRoot [_, _] = Nothing
+    findRoot (x :: y :: z :: rest) =
+      -- Case 1: .claude/projects/<encoded-path>/... -> decode path
+      if x == ".claude" && y == "projects"
+      then Just (decodeProjectPath z)
+      -- Case 2: <proj>/.claude/... -> take everything before .claude
+      else if y == ".claude" && z /= "projects"
+           then Just ("/" ++ joinBy "/" (filter (/= "") (takeWhile (/= ".claude") (x :: y :: z :: rest))))
+           else findRoot (y :: z :: rest)
 
 ||| Make cwd relative to project root
 ||| e.g. cwd=/Users/bob/code/idris2-ouc/src, root=/Users/bob/code/idris2-ouc -> src
@@ -233,12 +262,55 @@ stripXmlTags s = pack $ go False (unpack s)
     go True (_ :: rest) = go True rest      -- Skip tag content
     go False (c :: rest) = c :: go False rest  -- Keep non-tag content
 
-||| Extract text content from a JSONL line (looks for "text" or "content" fields)
+||| Check if line is an assistant message
+isAssistantMessage : String -> Bool
+isAssistantMessage line = isInfixOf "\"type\":\"assistant\"" line
+
+||| Extract text from assistant message content array
+||| Looks for pattern: "type":"text","text":"..." in the line
+extractAssistantText : String -> Maybe String
+extractAssistantText line =
+  -- Look for "type":"text","text":" pattern
+  let chars = unpack line
+      pattern = unpack "\"type\":\"text\",\"text\":\""
+  in case findPattern pattern chars of
+       Nothing => Nothing
+       Just idx =>
+         let afterPattern = drop (idx + length pattern) chars
+             -- Extract until closing quote (handle escaped quotes)
+             text = extractUntilQuote afterPattern
+         in if null text then Nothing else Just (pack text)
+  where
+    findPattern : List Char -> List Char -> Maybe Nat
+    findPattern needle haystack = go 0 haystack
+      where
+        startsWith : List Char -> List Char -> Bool
+        startsWith [] _ = True
+        startsWith _ [] = False
+        startsWith (x :: xs) (y :: ys) = x == y && startsWith xs ys
+
+        go : Nat -> List Char -> Maybe Nat
+        go _ [] = Nothing
+        go n hs@(_ :: rest) =
+          if startsWith needle hs then Just n else go (S n) rest
+
+    extractUntilQuote : List Char -> List Char
+    extractUntilQuote [] = []
+    extractUntilQuote ('\\' :: '"' :: rest) = '\\' :: '"' :: extractUntilQuote rest
+    extractUntilQuote ('\\' :: c :: rest) = '\\' :: c :: extractUntilQuote rest
+    extractUntilQuote ('"' :: _) = []
+    extractUntilQuote (c :: rest) = c :: extractUntilQuote rest
+
+||| Extract text content from a JSONL line
+||| For assistant messages: extract message.content[].text where type="text"
+||| For other lines: fall back to simple text/content extraction
 extractLineContent : String -> Maybe String
 extractLineContent line =
-  let raw = case extractJsonStringSimple "text" line of
-              Just t => if t == "" then extractJsonStringSimple "content" line else Just t
-              Nothing => extractJsonStringSimple "content" line
+  let raw = if isAssistantMessage line
+            then extractAssistantText line
+            else case extractJsonStringSimple "text" line of
+                   Just t => if t == "" then extractJsonStringSimple "content" line else Just t
+                   Nothing => extractJsonStringSimple "content" line
   in map (stripXmlTags . unescapeJsonString) raw
 
 ||| Read transcript file and extract last N lines of content
